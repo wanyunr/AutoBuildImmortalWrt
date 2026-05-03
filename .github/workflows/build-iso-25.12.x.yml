@@ -5,6 +5,9 @@
 
 name: build 25.12.x ISO 
 
+permissions:
+  contents: write   # 👈 必加
+  
 on:
   workflow_dispatch:
     inputs:
