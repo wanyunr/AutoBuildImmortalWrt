@@ -58,7 +58,7 @@ jobs:
 
       - name: Set executable permissions
         run: |
-          chmod +x ${{ github.workspace }}/x86-64/build25.sh
+          chmod +x "${{ github.workspace }}/x86-64/build25.sh"
 
       - name: Validate PPPoE Inputs
         run: |
@@ -75,9 +75,9 @@ jobs:
           include_docker="${{ github.event.inputs.include_docker }}"
           luci_version="${{ github.event.inputs.luci_version }}"
 
-          echo "Building Profile: $profile MB"
-          echo "Docker: $include_docker"
-          echo "LuCI Version: $luci_version"
+          echo "Building Profile: ${profile} MB"
+          echo "Docker: ${include_docker}"
+          echo "LuCI Version: ${luci_version}"
 
           docker run --rm -i \
             --user root \
@@ -87,9 +87,9 @@ jobs:
             -v "${{ github.workspace }}/x86-64/imm25.config:/home/build/immortalwrt/.config" \
             -v "${{ github.workspace }}/shell:/home/build/immortalwrt/shell" \
             -v "${{ github.workspace }}/x86-64/build25.sh:/home/build/immortalwrt/build.sh" \
-            -e PROFILE=$profile \
-            -e INCLUDE_DOCKER=$include_docker \
-            -e ENABLE_PPPOE=${{ github.event.inputs.enable_pppoe }} \
+            -e PROFILE="${profile}" \
+            -e INCLUDE_DOCKER="${include_docker}" \
+            -e ENABLE_PPPOE="${{ github.event.inputs.enable_pppoe }}" \
             -e PPPOE_ACCOUNT="${{ github.event.inputs.pppoe_account }}" \
             -e PPPOE_PASSWORD="${{ github.event.inputs.pppoe_password }}" \
             immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} \
@@ -98,12 +98,15 @@ jobs:
       - name: ✅ 复制固件到工作目录
         run: |
           cp bin/targets/x86/64/*squashfs-combined-efi.img.gz .
+          cp bin/targets/x86/64/*.manifest .
 
-      - name: ✅ 上传固件 Artifact
+      - name: ✅ 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-img
-          path: "*.img.gz"
+          name: firmware-files
+          path: |
+            *.img.gz
+            *.manifest
 
   build_installer_iso:
     runs-on: ubuntu-22.04
@@ -113,7 +116,7 @@ jobs:
       - name: Download firmware artifact
         uses: actions/download-artifact@v4
         with:
-          name: firmware-img
+          name: firmware-files
 
       - name: ⏬ 克隆 img-installer
         run: |
@@ -139,13 +142,49 @@ jobs:
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
+      - name: Extract Package List
+        id: pkglist
+        run: |
+          MANIFEST=$(find . -name "*.manifest" | head -n1)
+
+          if [ -f "$MANIFEST" ]; then
+
+            awk '{print $1}' "$MANIFEST" \
+              | sort -u > packages.list
+
+            COUNT=$(wc -l < packages.list)
+
+            {
+              echo "packages<<EOF"
+              head -100 packages.list
+              echo ""
+              echo "... (仅显示前100个软件包)"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+
+            echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "manifest not found" > packages.list
+
+            {
+              echo "packages<<EOF"
+              echo "manifest not found"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+
+            echo "count=0" >> "$GITHUB_OUTPUT"
+
+          fi
+
       - name: ✅ 制作 ISO
         run: |
           firmware_file=$(ls *squashfs-combined-efi.img.gz)
 
           cd img-installer
 
-          bash autobuild/autobuild.sh "../$firmware_file"
+          bash autobuild/autobuild.sh "../${firmware_file}"
 
       - name: Rename ISO
         run: |
@@ -168,16 +207,35 @@ jobs:
           cat > release.md << EOF
           # ImmortalWrt Installer ISO
 
+          基于 Debian Live 的 ImmortalWrt/OpenWrt 安装器。
+
+          启动后执行：
+
+          \`\`\`bash
+          ddd
+          \`\`\`
+
+          即可进入安装菜单。
+
+          ---
+
           ## 构建信息
 
-          - LuCI版本: ${{ github.event.inputs.luci_version }}
-          - 固件大小: ${{ github.event.inputs.profile }} MB
-          - Docker支持: ${{ github.event.inputs.include_docker }}
-          - PPPoE预配置: ${{ github.event.inputs.enable_pppoe }}
-          - 构建时间: ${{ steps.release_info.outputs.timestamp }}
-          - Release后缀: ${{ github.event.inputs.release_suffix }}
+          | 项目 | 内容 |
+          |------|------|
+          | LuCI版本 | ${{ github.event.inputs.luci_version }} |
+          | 固件大小 | ${{ github.event.inputs.profile }} MB |
+          | Docker支持 | ${{ github.event.inputs.include_docker }} |
+          | PPPoE预配置 | ${{ github.event.inputs.enable_pppoe }} |
+          | Release后缀 | ${{ github.event.inputs.release_suffix }} |
+          | 构建时间 | ${{ steps.release_info.outputs.timestamp }} |
+          | Git Commit | ${{ github.sha }} |
+          | Git Branch | ${{ github.ref_name }} |
+          | Workflow | ${{ github.workflow }} |
 
-          ## 特性
+          ---
+
+          ## 安装器特性
 
           - Debian Live 极速启动
           - 支持 BIOS / UEFI
@@ -186,18 +244,39 @@ jobs:
           - 支持 ESXi
           - 支持 Hyper-V
           - 支持 KVM/QEMU
+          - 支持 VirtualBox
           - 支持实体机安装
           - 支持多硬盘选择
           - 自动扩容剩余空间
+          - 安装后保留剩余磁盘空间
           - 基于 wukongdaily/img-installer
 
-          安装进入Live系统后执行：
+          ---
 
-          \`\`\`bash
-          ddd
+          ## 内置软件包
+
+          总计：
+
+          **${{ steps.pkglist.outputs.count }} 个软件包**
+
+          前100项：
+
+          \`\`\`text
+          ${{ steps.pkglist.outputs.packages }}
           \`\`\`
 
-          即可启动安装菜单。
+          完整列表请下载附件：
+
+          \`packages.list\`
+
+          ---
+
+          ## ISO 文件
+
+          \`\`\`
+          immortalwrt-installer-${{ github.event.inputs.luci_version }}-${{ github.event.inputs.profile }}M-${{ github.event.inputs.include_docker }}-${{ steps.release_info.outputs.timestamp }}-${{ github.event.inputs.release_suffix }}.iso
+          \`\`\`
+
           EOF
 
       - name: 🚀 上传 Release
@@ -212,6 +291,7 @@ jobs:
 
           files: |
             img-installer/output/*.iso
+            packages.list
 
           generate_release_notes: true
 
@@ -223,3 +303,9 @@ jobs:
           name: installer-iso
           path: |
             img-installer/output/*.iso
+
+      - name: 📦 上传 Package List Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-list
+          path: packages.list
