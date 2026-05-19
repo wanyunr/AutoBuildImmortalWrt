@@ -157,9 +157,9 @@ jobs:
           profile_label="$(echo "${{ github.event.inputs.profile }}" | tr -d '[:space:]' | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+|-+$//g')"
           [ -n "$profile_label" ] || profile_label="unknown"
 
-          release_name="ImmortalWrt-${luci_version}-${profile_label}M-${timestamp}"
-          tag="${release_name}-${suffix}"
-          iso_name="${release_name}-${suffix}.iso"
+          release_name="ImmortalWrt-${luci_version}-x86_64-${profile_label}M-${timestamp}"
+          tag="ImmortalWrt-${luci_version}-x86_64-${profile_label}M-${suffix}-${timestamp}"
+          iso_name="${tag}.iso"
           custom_packages_name="custom-packages-${timestamp}.list"
 
           {
