@@ -115,10 +115,17 @@ jobs:
           done
 
       - name: Collect firmware and manifest
+        shell: bash
         run: |
           mkdir -p release-input
           cp "${{ github.workspace }}"/bin/targets/x86/64/*squashfs-combined-efi.img.gz release-input/
           cp "${{ github.workspace }}"/bin/targets/x86/64/*.manifest release-input/
+          CUSTOM_PACKAGES=""
+          source "${{ github.workspace }}/shell/custom-packages.sh"
+          printf '%s\n' $CUSTOM_PACKAGES \
+            | sed '/^$/d' \
+            | awk '$0 !~ /^-/ && $0 ~ /^[A-Za-z0-9][A-Za-z0-9._+-]*$/' \
+            | sort -u > release-input/custom-packages.list
           ls -lh release-input
 
       - name: Upload firmware artifact for ISO generation
@@ -150,6 +157,7 @@ jobs:
           tag="Custom-Installer-x86_64-ISO-${suffix}-${timestamp}"
           iso_name="immortalwrt-installer-x86_64-${suffix}-${timestamp}.iso"
           packages_name="packages-${suffix}-${timestamp}.list"
+          custom_packages_name="custom-packages-${suffix}-${timestamp}.list"
 
           {
             echo "timestamp=$timestamp"
@@ -157,6 +165,7 @@ jobs:
             echo "tag=$tag"
             echo "iso_name=$iso_name"
             echo "packages_name=$packages_name"
+            echo "custom_packages_name=$custom_packages_name"
           } >> "$GITHUB_OUTPUT"
 
       - name: Clone img-installer project
@@ -192,18 +201,25 @@ jobs:
 
           cp "$manifest_file" release-assets/firmware.manifest
           awk '{print $1}' "$manifest_file" | sed '/^$/d' | sort -u > "release-assets/${{ steps.vars.outputs.packages_name }}"
+          if [ -f custom-packages.list ]; then
+            cp custom-packages.list "release-assets/${{ steps.vars.outputs.custom_packages_name }}"
+          else
+            : > "release-assets/${{ steps.vars.outputs.custom_packages_name }}"
+          fi
           cp img-installer/output/custom-installer-x86_64.iso "release-assets/${{ steps.vars.outputs.iso_name }}"
 
           firmware_file="$(find . -maxdepth 1 -name '*squashfs-combined-efi.img.gz' -print -quit)"
           firmware_name="$(basename "$firmware_file")"
           manifest_name="$(basename "$manifest_file")"
           package_count="$(wc -l < "release-assets/${{ steps.vars.outputs.packages_name }}" | xargs)"
+          custom_package_count="$(wc -l < "release-assets/${{ steps.vars.outputs.custom_packages_name }}" | xargs)"
           iso_size="$(du -h "release-assets/${{ steps.vars.outputs.iso_name }}" | awk '{print $1}')"
 
           {
             echo "firmware_name=$firmware_name"
             echo "manifest_name=$manifest_name"
             echo "package_count=$package_count"
+            echo "custom_package_count=$custom_package_count"
             echo "iso_size=$iso_size"
           } >> "$GITHUB_OUTPUT"
 
@@ -229,6 +245,7 @@ jobs:
           | ISO 文件 | `${{ steps.vars.outputs.iso_name }}` |
           | ISO 大小 | `${{ steps.release_files.outputs.iso_size }}` |
           | 软件包数量 | `${{ steps.release_files.outputs.package_count }}` |
+          | Custom Packages | `${{ steps.release_files.outputs.custom_package_count }}` |
           | Workflow Run | `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}` |
           | Commit | `${{ github.sha }}` |
 
@@ -237,6 +254,7 @@ jobs:
           - `${{ steps.vars.outputs.iso_name }}`: 可启动安装器 ISO
           - `${{ steps.vars.outputs.packages_name }}`: 从 `.manifest` 自动提取的软件包清单
           - `firmware.manifest`: 原始固件 manifest
+          - `${{ steps.vars.outputs.custom_packages_name }}`: selected packages from `shell/custom-packages.sh`
           EOF
 
       - name: Upload ISO and packages.list to Release
@@ -248,6 +266,7 @@ jobs:
           files: |
             release-assets/${{ steps.vars.outputs.iso_name }}
             release-assets/${{ steps.vars.outputs.packages_name }}
+            release-assets/${{ steps.vars.outputs.custom_packages_name }}
             release-assets/firmware.manifest
           token: ${{ secrets.GITHUB_TOKEN }}
           fail_on_unmatched_files: true
