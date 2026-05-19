@@ -1,7 +1,7 @@
-# 此工作流是为了构建一个immortalwrt固件的安装器 格式为iso 可用于所有的虚拟机 和 物理机
-# 所谓安装器就是用来安装用的 iso引导的是一个启动速度极快的debian live系统 跑码后输入命令 ddd 即可调出安装菜单
-# 安装时 若是多张硬盘 你可以选择 需要安装的硬盘 此类方法安装的openwrt 安装后是有剩余空间的 更多信息请参考 wukongdaily/img-installer 项目
-# 几乎所有linux 都有各自的安装器 唯独openwrt和armbian 没有, 希望此工作流 弥补这个遗憾 让你更优雅的 安装openwrt 
+# 此工作流是为了构建一个 immortalwrt 固件的安装器，格式为 iso，可用于虚拟机和物理机
+# ISO 引导一个启动速度极快的 Debian Live 系统，启动后输入命令 ddd 即可调出安装菜单
+# 安装时若有多张硬盘，可选择目标硬盘；安装后的 OpenWrt 会保留剩余空间
+# 更多信息请参考 wukongdaily/img-installer 项目
 
 name: build ISO
 
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       luci_version:
-        description: "选择luci版本"
+        description: "选择 luci 版本"
         required: false
         default: "24.10.6"
         type: choice
@@ -22,36 +22,43 @@ on:
           - 24.10.5
           - 24.10.6
       profile:
-        description: '请输入要编译固件大小 单位(MB)'
+        description: "请输入要编译固件大小，单位(MB)，多个值用英文逗号分隔"
         required: true
-        default: '1024'
+        default: "1024"
       include_docker:
         description: "是否编译 Docker 插件"
         required: true
-        default: 'yes'
+        default: "yes"
         type: choice
         options:
-          - 'yes'
-          - 'no'
+          - "yes"
+          - "no"
       enable_store:
         description: "集成 store 商店"
         required: false
         type: boolean
         default: true
       enable_pppoe:
-        description: "是否配置PPPoE拨号信息?"
+        description: "是否配置 PPPoE 拨号信息?"
         required: true
-        default: 'no'
+        default: "no"
         type: choice
         options:
-          - 'yes'
-          - 'no'
+          - "yes"
+          - "no"
       pppoe_account:
-        description: "宽带账号 (若启用PPPoE)"
+        description: "宽带账号 (若启用 PPPoE)"
         required: false
       pppoe_password:
-        description: "宽带密码 (若启用PPPoE)"
+        description: "宽带密码 (若启用 PPPoE)"
         required: false
+      release_suffix:
+        description: "自定义 Release 后缀，例如 home、docker、pppoe"
+        required: false
+        default: "custom"
+
+permissions:
+  contents: write
 
 jobs:
   build_immortalwrt:
@@ -59,37 +66,38 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set executable permissions
-        run: chmod +x ${{ github.workspace }}/x86-64/build24.sh
-      
+        run: chmod +x "${{ github.workspace }}/x86-64/build24.sh"
+
       - name: Enable Store integration
         run: |
-          if [ "${{ github.event.inputs.enable_store }}" == "true" ]; then
+          if [ "${{ github.event.inputs.enable_store }}" = "true" ]; then
             echo 'CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-store"' >> shell/custom-packages.sh
-            echo "✅ 已追加 luci-app-store"
+            echo "已追加 luci-app-store"
           else
-            echo "❎ 未启用 luci-app-store"
+            echo "未启用 luci-app-store"
           fi
 
-      - name: Validate PPPoE Inputs
+      - name: Validate PPPoE inputs
         run: |
-          if [[ "${{ github.event.inputs.enable_pppoe }}" == "yes" ]]; then
-            if [[ -z "${{ github.event.inputs.pppoe_account }}" || -z "${{ github.event.inputs.pppoe_password }}" ]]; then
+          if [ "${{ github.event.inputs.enable_pppoe }}" = "yes" ]; then
+            if [ -z "${{ github.event.inputs.pppoe_account }}" ] || [ -z "${{ github.event.inputs.pppoe_password }}" ]; then
               echo "Error: PPPoE account and password must be provided when PPPoE is enabled!"
               exit 1
             fi
           fi
 
-      - name: ✅ 正在构建ImmortalWrt固件
+      - name: Build ImmortalWrt firmware
         run: |
           profiles="${{ github.event.inputs.profile }}"
           include_docker="${{ github.event.inputs.include_docker }}"
           luci_version="${{ github.event.inputs.luci_version }}"
           IFS=',' read -r -a profile_array <<< "$profiles"
-          
+
           for profile in "${profile_array[@]}"; do
+            profile="$(echo "$profile" | xargs)"
             echo "Building for profile: $profile"
             docker run --rm -i \
               --user root \
@@ -98,24 +106,27 @@ jobs:
               -v "${{ github.workspace }}/x86-64/imm.config:/home/build/immortalwrt/.config" \
               -v "${{ github.workspace }}/shell:/home/build/immortalwrt/shell" \
               -v "${{ github.workspace }}/x86-64/build24.sh:/home/build/immortalwrt/build.sh" \
-              -e PROFILE=$profile \
-              -e INCLUDE_DOCKER=$include_docker \
-              -e ENABLE_PPPOE=${{ inputs.enable_pppoe }} \
-              -e PPPOE_ACCOUNT=${{ inputs.pppoe_account }} \
-              -e PPPOE_PASSWORD=${{ inputs.pppoe_password }} \
-              immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} /bin/bash /home/build/immortalwrt/build.sh
+              -e PROFILE="$profile" \
+              -e INCLUDE_DOCKER="$include_docker" \
+              -e ENABLE_PPPOE="${{ github.event.inputs.enable_pppoe }}" \
+              -e PPPOE_ACCOUNT="${{ github.event.inputs.pppoe_account }}" \
+              -e PPPOE_PASSWORD="${{ github.event.inputs.pppoe_password }}" \
+              "immortalwrt/imagebuilder:x86-64-openwrt-${luci_version}" /bin/bash /home/build/immortalwrt/build.sh
           done
 
-      - name: ✅ 复制固件到根目录
+      - name: Collect firmware and manifest
         run: |
-          cp ${{ github.workspace }}/bin/targets/x86/64/*squashfs-combined-efi.img.gz ${{ github.workspace }}
+          mkdir -p release-input
+          cp "${{ github.workspace }}"/bin/targets/x86/64/*squashfs-combined-efi.img.gz release-input/
+          cp "${{ github.workspace }}"/bin/targets/x86/64/*.manifest release-input/
+          ls -lh release-input
 
-      - name: ✅ 上传固件到 artifact (for ISO generation)
+      - name: Upload firmware artifact for ISO generation
         uses: actions/upload-artifact@v4
         with:
           name: firmware-img
-          path: |
-            *.img.gz
+          path: release-input/*
+          if-no-files-found: error
 
   build_installer_iso:
     runs-on: ubuntu-22.04
@@ -127,27 +138,116 @@ jobs:
         with:
           name: firmware-img
 
-      - name: ⏬ 同步 img-installer 项目 准备制作ISO
+      - name: Prepare release variables
+        id: vars
+        shell: bash
         run: |
-          git clone https://github.com/wukongdaily/img-installer.git
-          cd img-installer
+          timestamp="$(TZ=Asia/Shanghai date +'%Y%m%d-%H%M%S')"
+          suffix="${{ github.event.inputs.release_suffix }}"
+          suffix="$(echo "${suffix:-custom}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g')"
+          [ -n "$suffix" ] || suffix="custom"
+
+          tag="Custom-Installer-x86_64-ISO-${suffix}-${timestamp}"
+          iso_name="immortalwrt-installer-x86_64-${suffix}-${timestamp}.iso"
+          packages_name="packages-${suffix}-${timestamp}.list"
+
+          {
+            echo "timestamp=$timestamp"
+            echo "suffix=$suffix"
+            echo "tag=$tag"
+            echo "iso_name=$iso_name"
+            echo "packages_name=$packages_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Clone img-installer project
+        run: git clone --depth 1 https://github.com/wukongdaily/img-installer.git
 
       - name: Set executable permissions for scripts
         run: |
           chmod +x "${{ github.workspace }}/img-installer/custom.sh"
           chmod +x "${{ github.workspace }}/img-installer/supportFiles/custom/build.sh"
 
-      - name: ✅ 制作 ISO
+      - name: Build ISO
         run: |
-          firmware_file=$(ls *squashfs-combined-efi.img.gz)
-          cd img-installer
-          bash autobuild/autobuild.sh "../$firmware_file"
+          firmware_file="$(find . -maxdepth 1 -name '*squashfs-combined-efi.img.gz' -print -quit)"
+          if [ -z "$firmware_file" ]; then
+            echo "Error: firmware image not found."
+            exit 1
+          fi
 
-      - name: 🚀 上传 ISO 到 Release
+          cd img-installer
+          bash autobuild/autobuild.sh "../${firmware_file#./}"
+
+      - name: Generate release files
+        id: release_files
+        shell: bash
+        run: |
+          mkdir -p release-assets
+
+          manifest_file="$(find . -maxdepth 1 -name '*.manifest' -print -quit)"
+          if [ -z "$manifest_file" ]; then
+            echo "Error: manifest file not found."
+            exit 1
+          fi
+
+          cp "$manifest_file" release-assets/firmware.manifest
+          awk '{print $1}' "$manifest_file" | sed '/^$/d' | sort -u > "release-assets/${{ steps.vars.outputs.packages_name }}"
+          cp img-installer/output/custom-installer-x86_64.iso "release-assets/${{ steps.vars.outputs.iso_name }}"
+
+          firmware_file="$(find . -maxdepth 1 -name '*squashfs-combined-efi.img.gz' -print -quit)"
+          firmware_name="$(basename "$firmware_file")"
+          manifest_name="$(basename "$manifest_file")"
+          package_count="$(wc -l < "release-assets/${{ steps.vars.outputs.packages_name }}" | xargs)"
+          iso_size="$(du -h "release-assets/${{ steps.vars.outputs.iso_name }}" | awk '{print $1}')"
+
+          {
+            echo "firmware_name=$firmware_name"
+            echo "manifest_name=$manifest_name"
+            echo "package_count=$package_count"
+            echo "iso_size=$iso_size"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate release body
+        run: |
+          cat > release-assets/release-info.md <<'EOF'
+          # ImmortalWrt Installer ISO
+
+          ## 构建信息
+
+          | 项目 | 值 |
+          | --- | --- |
+          | Release Tag | `${{ steps.vars.outputs.tag }}` |
+          | Release 后缀 | `${{ steps.vars.outputs.suffix }}` |
+          | 构建时间 (Asia/Shanghai) | `${{ steps.vars.outputs.timestamp }}` |
+          | Luci 版本 | `${{ github.event.inputs.luci_version }}` |
+          | 固件大小 Profile | `${{ github.event.inputs.profile }} MB` |
+          | Docker 插件 | `${{ github.event.inputs.include_docker }}` |
+          | Store 商店 | `${{ github.event.inputs.enable_store }}` |
+          | PPPoE 配置 | `${{ github.event.inputs.enable_pppoe }}` |
+          | 固件文件 | `${{ steps.release_files.outputs.firmware_name }}` |
+          | Manifest 文件 | `${{ steps.release_files.outputs.manifest_name }}` |
+          | ISO 文件 | `${{ steps.vars.outputs.iso_name }}` |
+          | ISO 大小 | `${{ steps.release_files.outputs.iso_size }}` |
+          | 软件包数量 | `${{ steps.release_files.outputs.package_count }}` |
+          | Workflow Run | `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}` |
+          | Commit | `${{ github.sha }}` |
+
+          ## 附件
+
+          - `${{ steps.vars.outputs.iso_name }}`: 可启动安装器 ISO
+          - `${{ steps.vars.outputs.packages_name }}`: 从 `.manifest` 自动提取的软件包清单
+          - `firmware.manifest`: 原始固件 manifest
+          EOF
+
+      - name: Upload ISO and packages.list to Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: "Custom-Installer-x86_64-ISO"
-          body_path: "${{ github.workspace }}/img-installer/autobuild/info.md"
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ImmortalWrt Installer ISO ${{ steps.vars.outputs.suffix }} ${{ steps.vars.outputs.timestamp }}
+          body_path: release-assets/release-info.md
           files: |
-            img-installer/output/custom-installer-x86_64.iso
-          token: "${{ secrets.GITHUB_TOKEN }}"
+            release-assets/${{ steps.vars.outputs.iso_name }}
+            release-assets/${{ steps.vars.outputs.packages_name }}
+            release-assets/firmware.manifest
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fail_on_unmatched_files: true
