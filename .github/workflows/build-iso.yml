@@ -156,15 +156,13 @@ jobs:
 
           tag="Custom-Installer-x86_64-ISO-${suffix}-${timestamp}"
           iso_name="immortalwrt-installer-x86_64-${suffix}-${timestamp}.iso"
-          packages_name="packages-${suffix}-${timestamp}.list"
-          custom_packages_name="custom-packages-${suffix}-${timestamp}.list"
+          custom_packages_name="custom-packages-${timestamp}.list"
 
           {
             echo "timestamp=$timestamp"
             echo "suffix=$suffix"
             echo "tag=$tag"
             echo "iso_name=$iso_name"
-            echo "packages_name=$packages_name"
             echo "custom_packages_name=$custom_packages_name"
           } >> "$GITHUB_OUTPUT"
 
@@ -193,14 +191,6 @@ jobs:
         run: |
           mkdir -p release-assets
 
-          manifest_file="$(find . -maxdepth 1 -name '*.manifest' -print -quit)"
-          if [ -z "$manifest_file" ]; then
-            echo "Error: manifest file not found."
-            exit 1
-          fi
-
-          cp "$manifest_file" release-assets/firmware.manifest
-          awk '{print $1}' "$manifest_file" | sed '/^$/d' | sort -u > "release-assets/${{ steps.vars.outputs.packages_name }}"
           if [ -f custom-packages.list ]; then
             cp custom-packages.list "release-assets/${{ steps.vars.outputs.custom_packages_name }}"
           else
@@ -210,17 +200,17 @@ jobs:
 
           firmware_file="$(find . -maxdepth 1 -name '*squashfs-combined-efi.img.gz' -print -quit)"
           firmware_name="$(basename "$firmware_file")"
-          manifest_name="$(basename "$manifest_file")"
-          package_count="$(wc -l < "release-assets/${{ steps.vars.outputs.packages_name }}" | xargs)"
           custom_package_count="$(wc -l < "release-assets/${{ steps.vars.outputs.custom_packages_name }}" | xargs)"
           iso_size="$(du -h "release-assets/${{ steps.vars.outputs.iso_name }}" | awk '{print $1}')"
+          iso_sha256="$(sha256sum "release-assets/${{ steps.vars.outputs.iso_name }}" | awk '{print $1}')"
+          iso_md5="$(md5sum "release-assets/${{ steps.vars.outputs.iso_name }}" | awk '{print $1}')"
 
           {
             echo "firmware_name=$firmware_name"
-            echo "manifest_name=$manifest_name"
-            echo "package_count=$package_count"
             echo "custom_package_count=$custom_package_count"
             echo "iso_size=$iso_size"
+            echo "iso_sha256=$iso_sha256"
+            echo "iso_md5=$iso_md5"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate release body
@@ -241,23 +231,19 @@ jobs:
           | Store 商店 | `${{ github.event.inputs.enable_store }}` |
           | PPPoE 配置 | `${{ github.event.inputs.enable_pppoe }}` |
           | 固件文件 | `${{ steps.release_files.outputs.firmware_name }}` |
-          | Manifest 文件 | `${{ steps.release_files.outputs.manifest_name }}` |
           | ISO 文件 | `${{ steps.vars.outputs.iso_name }}` |
           | ISO 大小 | `${{ steps.release_files.outputs.iso_size }}` |
-          | 软件包数量 | `${{ steps.release_files.outputs.package_count }}` |
+          | ISO SHA256 | `${{ steps.release_files.outputs.iso_sha256 }}` |
+          | ISO MD5 | `${{ steps.release_files.outputs.iso_md5 }}` |
           | Custom Packages | `${{ steps.release_files.outputs.custom_package_count }}` |
-          | Workflow Run | `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}` |
-          | Commit | `${{ github.sha }}` |
 
           ## 附件
 
-          - `${{ steps.vars.outputs.iso_name }}`: 可启动安装器 ISO
-          - `${{ steps.vars.outputs.packages_name }}`: 从 `.manifest` 自动提取的软件包清单
-          - `firmware.manifest`: 原始固件 manifest
+          - `${{ steps.vars.outputs.iso_name }}`: bootable installer ISO
           - `${{ steps.vars.outputs.custom_packages_name }}`: selected packages from `shell/custom-packages.sh`
           EOF
 
-      - name: Upload ISO and packages.list to Release
+      - name: Upload ISO and custom packages list to Release
         uses: softprops/action-gh-release@v2.2.1
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
@@ -265,8 +251,6 @@ jobs:
           body_path: release-assets/release-info.md
           files: |
             release-assets/${{ steps.vars.outputs.iso_name }}
-            release-assets/${{ steps.vars.outputs.packages_name }}
             release-assets/${{ steps.vars.outputs.custom_packages_name }}
-            release-assets/firmware.manifest
           token: ${{ secrets.GITHUB_TOKEN }}
           fail_on_unmatched_files: true
