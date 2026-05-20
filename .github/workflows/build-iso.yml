@@ -60,9 +60,6 @@ on:
 permissions:
   contents: write
 
-permissions:
-  contents: write
-
 jobs:
   build_immortalwrt:
     runs-on: ubuntu-22.04
